@@ -16,7 +16,6 @@ class GRUModel(nn.Module):
         self.bidirectional = True
         self.num_directions = 2 if self.bidirectional else 1
 
-        # GRU Layer, where batch_first ensures input format is (Batch, Seq, Feature)
         self.gru = nn.GRU(
             input_size=input_size,
             hidden_size=hidden_size, 
@@ -32,20 +31,10 @@ class GRUModel(nn.Module):
         )
 
     def forward(self, x):
-        # x shape: (batch_size, 672, 29)
-        #batch_size = x.size(0)
-        #h0 = self.h0_param.repeat(1, batch_size, 1).to(x.device)
         out, h_n = self.gru(x)
         forward = h_n[-2,:,:]
         backward = h_n[-1,:,:]
         embedding = torch.cat([forward, backward], dim=-1) 
-        #embedding = h_n[-1]
-        # Concatenate them -> Shape: (Batch, hidden_size * 2)
-        #final_state = out.mean(dim=1)
-        #final_state = torch.cat([h_n[-2], h_n[-1]], dim=-1)
-        #prediction = self.mlp(final_state)
-        #embedding = torch.mean(out, dim=1)
-
         # Prediction should be the shape of batch_size  and 11
         return self.mlp(embedding)
     
@@ -117,23 +106,24 @@ print("first 5 feature_keys:", feature_keys[:5])
 
 # %%
 from torch.utils.data import DataLoader, TensorDataset
+
 # Here should be data loading parameters
 from sklearn.model_selection import train_test_split
 y_min = y.min(axis=0)
 y_max = y.max(axis=0)
 y_raw_range = y_max - y_min
 
-# 1. Find constants BEFORE modifying the range array
+# Finding the constant paramters before modifying the range array
 constant_cols = np.where(y_raw_range == 0.0)[0]
 
-# 2. Create safe divisor
+# Creating a safe divisor
 y_range = y_raw_range.copy()
 y_range[y_range == 0] = 1.0 
 
-# 3. Normalize
+# Normalizing
 y_norm = (y - y_min) / y_range
 
-# 4. Filter
+# Filtering values 
 y_min_filtered = np.delete(y_min, constant_cols)
 y_max_filtered = np.delete(y_max, constant_cols)
 y_norm_filtered = np.delete(y_norm, constant_cols, axis=1)
@@ -178,22 +168,13 @@ def train_model(model, loader, criterion, optimizer, device):
     running_loss = 0.0
     for X_batch, y_batch in loader:
         X_batch, y_batch = X_batch.to(device), y_batch.to(device)
-
         # forward pass
         outputs = model(X_batch)
         loss = criterion(outputs, y_batch)
         # backward and optimize
-        optimizer.zero_grad() # clear previous gradient
-        loss.backward() # computing gradient of the loss
-        # inside train loop (after loss.backward())
-        total_norm = 0.0
-        # for p in model.parameters():
-        #     if p.grad is not None:
-        #         param_norm = p.grad.data.norm(2)
-        #         total_norm += param_norm.item()**2
-        # total_norm = total_norm**0.5
-        #print("grad norm:", total_norm)
-        optimizer.step() # updating model parameters
+        optimizer.zero_grad()
+        loss.backward() 
+        optimizer.step() 
 
         running_loss += loss.item() * X_batch.size(0)
     return running_loss / len(loader.dataset)
@@ -204,16 +185,13 @@ def evaluate_model(model, loader, criterion, device):
     test_loss = 0.0
     preds = []
     truths = []
-    with torch.no_grad(): # disabling gradient calcuations for efficiency
-        #y_pred_norm = model(X_test_tensor.to(device)).cpu().numpy()
+    with torch.no_grad(): 
         for X_batch, y_batch in loader:
             X_batch = X_batch.to(device)
             y_batch = y_batch.to(device)
             outputs = model(X_batch)
-
             loss = criterion(outputs, y_batch)
             test_loss += loss.item()* X_batch.size(0)
-            #y_batch= np.array(y_batch)
             # The batches should be splitted to the sequence of arrays
             preds.append(outputs.cpu().numpy())
             truths.append(y_batch.cpu().numpy())
@@ -274,7 +252,7 @@ for target_idx in range(num_targets):
 print("\n=== All models trained ===\n")
 
 # %%
-# ===== SECOND PLOT – denormalised =====
+# The denormalised plot of last parameter
 y_min = y_min_filtered[target_idx]
 y_max = y_max_filtered[target_idx]
 
@@ -292,6 +270,128 @@ plt.savefig(f"figuresGRU/{target_idx}_denorm.pdf")
 plt.show()
 
 # %%
+# ==== Gaussian Processes ====
+import gpytorch
+
+from sklearn.decomposition import PCA
+def extract_embeddings(model, X_tensor, device, batch_size=64):
+    model.eval()
+    embeddings = []
+    loader = DataLoader(
+        TensorDataset(X_tensor),
+        batch_size=batch_size,
+        shuffle=False
+    )
+    with torch.no_grad():
+        for (X_batch,) in loader:
+            X_batch = X_batch.to(device)
+            out, h_n = model.gru(X_batch)
+            forward = h_n[-2]
+            backward = h_n[-1]
+            emb = torch.cat([forward, backward], dim=-1)
+            embeddings.append(emb.cpu())
+    return torch.cat(embeddings, dim=0)
 
 
-# So we have to train model for all parameters, hypertune it 
+# Using exact inferecne, the simplest GP model
+class EmbeddingGP(gpytorch.models.ExactGP):
+    def __init__(self, train_x, train_y, likelihood):
+        super().__init__(train_x, train_y, likelihood)
+        # Mean function, before seeing the data, assume the function is flat
+        # GP learns deviations via the kernel
+        self.mean_module = gpytorch.means.ConstantMean() 
+        # Covariance module
+        self.covar_module = gpytorch.kernels.ScaleKernel(
+    gpytorch.kernels.MaternKernel(
+        nu=2.5,
+        ard_num_dims=train_x.shape[1]
+    )
+)
+
+
+    def forward(self, x):
+        mean_x = self.mean_module(x)
+        covar_x = self.covar_module(x)
+        return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
+
+# %%
+gp_models = []
+
+for target_idx, model_t in enumerate(models):
+    print(f"\n=== Training GP for parameter {param_keys_filtered[target_idx]} ===")
+
+    # Freeze GRU
+    for p in model_t.parameters():
+        p.requires_grad = False
+    model_t = model_t.to(device)
+
+    # Extract embeddings
+    Z_train = extract_embeddings(model_t, X_train_tensor, device)
+    Z_test  = extract_embeddings(model_t, X_test_tensor, device)
+    
+    Z_train = Z_train.float()
+    Z_test  = Z_test.float()
+    # Normalising the values
+    Z_mean = Z_train.mean(dim=0, keepdim=True)
+    Z_std  = Z_train.std(dim=0, keepdim=True) + 1e-6
+
+    Z_train = (Z_train - Z_mean) / Z_std
+    Z_test  = (Z_test  - Z_mean) / Z_std
+    pca = PCA(n_components=20)   
+    Z_train = torch.from_numpy(pca.fit_transform(Z_train.numpy())).float()
+    Z_test  = torch.from_numpy(pca.transform(Z_test.numpy())).float()
+
+
+
+    y_train_gp = y_train_tensor[:, target_idx].cpu()
+    y_test_gp  = y_test_tensor[:, target_idx].cpu()
+
+    # Likelihood + GP, model observation noise
+    likelihood = gpytorch.likelihoods.GaussianLikelihood(
+        noise_constraint=gpytorch.constraints.GreaterThan(1e-4)
+    )
+    gp_model = EmbeddingGP(Z_train, y_train_gp, likelihood)
+
+    gp_model.train()
+    likelihood.train()
+
+    optimizer = torch.optim.Adam(gp_model.parameters(), lr=0.1)
+    mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, gp_model)
+
+    for i in range(100):
+        optimizer.zero_grad()
+        output = gp_model(Z_train)
+        loss = -mll(output, y_train_gp) # what is happening here?
+        loss.backward()
+        optimizer.step()
+
+    gp_model.eval()
+    likelihood.eval()
+
+    with torch.no_grad(), gpytorch.settings.fast_pred_var():
+        pred_dist = likelihood(gp_model(Z_test))
+        mean = pred_dist.mean.numpy()
+        std  = pred_dist.stddev.numpy()
+
+    gp_models.append((gp_model, likelihood))
+
+    # Plot GP mean vs truth
+    plt.figure()
+    plt.errorbar(
+        y_test_gp.numpy(),
+        mean,
+        yerr=2*std,
+        fmt='o',
+        alpha=0.5
+    )
+    lims = [
+        min(plt.xlim()[0], plt.ylim()[0]),
+        max(plt.xlim()[1], plt.ylim()[1])
+    ]
+    plt.plot(lims, lims, 'k--')
+    plt.xlabel("True (normalized)")
+    plt.ylabel("GP mean ± 2σ")
+    plt.title(f"GP on embeddings: {param_keys_filtered[target_idx]}")
+    plt.show()
+
+# %%
