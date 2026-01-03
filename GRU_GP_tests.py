@@ -5,6 +5,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 import matplotlib.pyplot as plt
+os.makedirs("Mean_only_plots", exist_ok=True)
+os.makedirs("Sqrt_uncertainty_images", exist_ok=True)
 
 class GRUModel(nn.Module):
     def __init__(self, input_size=29, hidden_size=64, output_size=11, num_layers=2):
@@ -372,26 +374,89 @@ for target_idx, model_t in enumerate(models):
         pred_dist = likelihood(gp_model(Z_test))
         mean = pred_dist.mean.numpy()
         std  = pred_dist.stddev.numpy()
+    print("mean shape:", mean.shape)
+    print("std shape:", std.shape)
+    print("y_test shape:", y_test_gp.shape)
 
-    gp_models.append((gp_model, likelihood))
+    print("mean finite:", np.isfinite(mean).all())
+    print("std finite:", np.isfinite(std).all())
+    print("y_test finite:", np.isfinite(y_test_gp.numpy()).all())
 
-    # Plot GP mean vs truth
+    # ---------- Taking only the mean ----------
+    y_true = y_test_gp.numpy().astype(np.float64)
+    y_mean = mean.astype(np.float64)
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+
+    ax.scatter(y_true, y_mean, s=30, color='tab:blue', alpha=0.7)
+
+    # Explicit limits with padding
+    low = min(y_true.min(), y_mean.min())
+    high = max(y_true.max(), y_mean.max())
+    pad = 0.05 * (high - low + 1e-6)
+
+    ax.set_xlim(low - pad, high + pad)
+    ax.set_ylim(low - pad, high + pad)
+
+    ax.plot([low, high], [low, high], 'k--', linewidth=1)
+
+    ax.set_xlabel("True (normalized)")
+    ax.set_ylabel("GP mean")
+    ax.set_title(f"GP mean only: {param_keys_filtered[target_idx]}")
+    ax.grid(alpha=0.3)
+    fig.canvas.draw()
+
+    fig.savefig(
+        f"Mean_only_plots/{param_keys_filtered[target_idx]}.png",
+        dpi=300,
+        bbox_inches="tight"
+    )
+    plt.close(fig)
+
+    # 2*mean
     plt.figure()
     plt.errorbar(
         y_test_gp.numpy(),
         mean,
-        yerr=2*std,
+        yerr=2 * std,
         fmt='o',
         alpha=0.5
     )
-    lims = [
-        min(plt.xlim()[0], plt.ylim()[0]),
-        max(plt.xlim()[1], plt.ylim()[1])
-    ]
-    plt.plot(lims, lims, 'k--')
+    plt.plot([low, high], [low, high], 'k--')
     plt.xlabel("True (normalized)")
-    plt.ylabel("GP mean ± 2σ")
+    plt.ylabel("GP mean and 2*sigma")
     plt.title(f"GP on embeddings: {param_keys_filtered[target_idx]}")
+    plt.grid(alpha=0.3)
     plt.show()
 
-# %%
+    # Root incertainty
+    y_std_sqrt = np.sqrt(std.astype(np.float64))
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.errorbar(
+        y_true,
+        y_mean,
+        yerr=y_std_sqrt,
+        fmt='o',
+        color='tab:orange',
+        markersize=4,
+        alpha=0.6,
+        capsize=2
+    )
+
+    ax.set_xlim(low - pad, high + pad)
+    ax.set_ylim(low - pad, high + pad)
+
+    ax.plot([low, high], [low, high], 'k--', linewidth=1)
+
+    ax.set_xlabel("True (normalized)")
+    ax.set_ylabel("GP mean and root uncertainty")
+    ax.set_title(f"GP mean with sqrt uncertainty: {param_keys_filtered[target_idx]}")
+    ax.grid(alpha=0.3)
+    fig.canvas.draw()
+
+    fig.savefig(
+        f"Sqrt_uncertainty_images/{param_keys_filtered[target_idx]}.png",
+        dpi=300,
+        bbox_inches="tight"
+    )
+    plt.close(fig)
