@@ -309,8 +309,6 @@ class EmbeddingGP(gpytorch.models.ExactGP):
         ard_num_dims=train_x.shape[1]
     )
 )
-
-
     def forward(self, x):
         mean_x = self.mean_module(x)
         covar_x = self.covar_module(x)
@@ -460,3 +458,5 @@ for target_idx, model_t in enumerate(models):
         bbox_inches="tight"
     )
     plt.close(fig)
+
+# %%
