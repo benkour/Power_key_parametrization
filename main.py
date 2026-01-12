@@ -31,9 +31,12 @@ def main():
     X, y, param_keys, feature_keys = load_json_timeseries(DATA_DIR)
 
     X = normalize_X(X)
-    y_norm, y_min, y_max, mask = normalize_y(y)
+    y_norm, y_min, y_max, constant_mask = normalize_y(y)
 
-    param_keys_filtered = [k for k, m in zip(param_keys, mask) if m]
+    param_keys_filtered = [
+        k for k, is_const in zip(param_keys, constant_mask) if not is_const
+        ]
+
 
     Xtr, Xte, ytr, yte = train_test_split(
         X, y_norm, test_size=0.2, random_state=42
@@ -60,13 +63,11 @@ def main():
             batch_size=BATCH_SIZE,
             shuffle=True
         )
-
         test_loader = DataLoader(
             TensorDataset(Xte, yte[:, i:i+1]),
             batch_size=BATCH_SIZE,
             shuffle=False
         )
-
         model = GRUModel(
             input_size=input_size,
             hidden_size=HIDDEN_SIZE,
@@ -95,9 +96,9 @@ def main():
     # ===============================
     # 3. GAUSSIAN PROCESSES
     # ===============================
-    len(param_keys_filtered) == len(gru_models) == ytr.shape[1]
+    assert len(gru_models) == len(param_keys_filtered) == ytr.shape[1]
     #for target_idx, model_t in enumerate(gru_models):
-    for target_idx, name in enumerate(param_keys_filtered):
+    for target_idx, (name, model_t) in enumerate(zip(param_keys_filtered, gru_models)):
         model_t = gru_models[target_idx]
         print(f"\n=== Training GP for {param_keys_filtered[target_idx]} ===")
 
