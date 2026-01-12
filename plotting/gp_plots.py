@@ -22,7 +22,6 @@ def plot_gp_mean_only(y_true, mean, name):
 
     lo, hi = _setup_axes(y_true, mean)
     ax.plot([lo, hi], [lo, hi], "k--", lw=1)
-
     ax.set_xlim(lo, hi)
     ax.set_ylim(lo, hi)
     ax.set_xlabel("True (normalized)")
@@ -55,8 +54,8 @@ def plot_gp_with_2sigma(y_true, mean, std, name):
     ax.set_xlim(lo, hi)
     ax.set_ylim(lo, hi)
     ax.set_xlabel("True (normalized)")
-    ax.set_ylabel("GP mean ± 2σ")
-    ax.set_title(f"GP mean ± 2σ: {name}")
+    ax.set_ylabel("GP mean with 2*sigma")
+    ax.set_title(f"GP mean with 2*sigma: {name}")
     ax.grid(alpha=0.3)
 
     fig.savefig(
@@ -69,7 +68,6 @@ def plot_gp_with_2sigma(y_true, mean, std, name):
 
 def plot_gp_sqrt_uncertainty(y_true, mean, std, name):
     fig, ax = plt.subplots(figsize=(6, 6))
-
     ax.errorbar(
         y_true, mean,
         yerr=np.sqrt(std),
@@ -77,15 +75,13 @@ def plot_gp_sqrt_uncertainty(y_true, mean, std, name):
         alpha=0.5,
         capsize=2
     )
-
     lo, hi = _setup_axes(y_true, mean)
     ax.plot([lo, hi], [lo, hi], "k--", lw=1)
-
     ax.set_xlim(lo, hi)
     ax.set_ylim(lo, hi)
     ax.set_xlabel("True (normalized)")
-    ax.set_ylabel("GP mean ± √σ")
-    ax.set_title(f"GP mean ± √σ: {name}")
+    ax.set_ylabel("GP mean and sqrt(sigma)")
+    ax.set_title(f"GP mean and sqrt(sigma): {name}")
     ax.grid(alpha=0.3)
 
     fig.savefig(

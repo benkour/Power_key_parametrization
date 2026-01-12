@@ -1,9 +1,11 @@
 # config.py
+# Correspodning folders 
 DATA_DIR = "ml_data/"
 FIG_DIR="figuresGRU"
 MEAN_PLOTS_DIR="Mean_only_plots"
 UNCERTAINTY_DIR="Sqrt_uncertainty_images"
 
+# Data preparation parameters 
 INPUT_SIZE=29
 HIDDEN_SIZE=64
 NUM_LAYERS=2

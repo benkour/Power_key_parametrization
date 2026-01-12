@@ -23,21 +23,17 @@ from torch.utils.data import DataLoader, TensorDataset
 from sklearn.model_selection import train_test_split
 from sklearn.decomposition import PCA
 
-
 def main():
     # ===============================
     # 1. LOAD + NORMALIZE DATA
     # ===============================
     X, y, param_keys, feature_keys = load_json_timeseries(DATA_DIR)
-
     X = normalize_X(X)
     y_norm, y_min, y_max, constant_mask = normalize_y(y)
-
     param_keys_filtered = [
         k for k, is_const in zip(param_keys, constant_mask) if not is_const
         ]
-
-
+    """Split is done before any model training, so it shuold not be any further data contamination"""
     Xtr, Xte, ytr, yte = train_test_split(
         X, y_norm, test_size=0.2, random_state=42
     )
@@ -85,29 +81,29 @@ def main():
             val_loss, _, _ = eval_epoch(
                 model, test_loader, criterion, device
             )
-
             print(
                 f"Epoch {epoch+1:03d}/{NUM_EPOCHS} "
                 f"| Train {train_loss:.4f} | Val {val_loss:.4f}"
             )
-
         gru_models.append(model)
 
     # ===============================
     # 3. GAUSSIAN PROCESSES
     # ===============================
+    # Testing if condition correct
     assert len(gru_models) == len(param_keys_filtered) == ytr.shape[1]
-    #for target_idx, model_t in enumerate(gru_models):
     for target_idx, (name, model_t) in enumerate(zip(param_keys_filtered, gru_models)):
         model_t = gru_models[target_idx]
         print(f"\n=== Training GP for {param_keys_filtered[target_idx]} ===")
 
-        # Freeze GRU
+        """Freezing the GRU (stop computing gradients) to treat is as a fixed feature extractor.
+        GP (modeling the function over a fixed input space) assumes that the inputs are fixed.
+        """
         for p in model_t.parameters():
             p.requires_grad = False
         model_t.eval()
 
-        # ---- embeddings ----
+        # Extracting embeddings - meaning the most GRU 
         Z_train = extract_embeddings(model_t, Xtr, device)
         Z_test  = extract_embeddings(model_t, Xte, device)
 
@@ -120,7 +116,9 @@ def main():
         Z_train = (Z_train - Z_mean) / Z_std
         Z_test  = (Z_test  - Z_mean) / Z_std
 
-        # PCA
+        """PCA - reducing the data components. Finds combinations of original 
+           features that explain the most variation in the data.
+        """
         pca = PCA(n_components=20)
         Z_train = torch.from_numpy(pca.fit_transform(Z_train.numpy())).float()
         Z_test  = torch.from_numpy(pca.transform(Z_test.numpy())).float()
@@ -133,7 +131,6 @@ def main():
         )
 
         gp_model = EmbeddingGP(Z_train, y_train_gp, likelihood)
-
         gp_model.train()
         likelihood.train()
 
@@ -147,7 +144,7 @@ def main():
             loss.backward()
             optimizer.step()
 
-        # ---- inference ----
+        # Inference
         gp_model.eval()
         likelihood.eval()
 
@@ -160,19 +157,15 @@ def main():
         # 4. PLOTTING
         # ===============================
         y_true = y_test_gp.numpy()
-
         plot_gp_mean_only(
             y_true, mean, param_keys_filtered[target_idx]
         )
-
         plot_gp_with_2sigma(
             y_true, mean, std, param_keys_filtered[target_idx]
         )
-
         plot_gp_sqrt_uncertainty(
             y_true, mean, std, param_keys_filtered[target_idx]
         )
-
 
 if __name__ == "__main__":
     main()
