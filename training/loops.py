@@ -23,4 +23,4 @@ def eval_epoch(model, loader, criterion, device):
             total += criterion(out, y).item() * x.size(0)
             preds.append(out.cpu().numpy())
             trues.append(y.cpu().numpy())
-    return total / len(loader.dataset), np.vstack(trues), np.vstack(preds)
+    return total / len(loader.dataset), np.vstack(trues), np.vstack(preds) # stacking arrays in sequence vertically 
